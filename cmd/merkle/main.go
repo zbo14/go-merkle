@@ -3,7 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/zballs/merkle"
+	"github.com/zbo14/merkle"
 )
 
 func main() {

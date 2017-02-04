@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/pkg/errors"
-	"hash"
 )
 
 type Node struct {
-	h                   []byte
-	parent, left, right *Node
+	h           []byte
+	left, right *Node
+	parent      *Node
+}
+
+func (nd *Node) Hash() []byte {
+	return nd.h
 }
 
 func (nd *Node) IsLeaf() bool {
@@ -32,8 +36,9 @@ func (l Level) String() string {
 	return buf.String()
 }
 
-func hashing(nd *Node, hash hash.Hash) ([]byte, error) {
+func hashing(nd *Node) ([]byte, error) {
 	n := nd
+	hash := NewHash()
 	var h []byte //specify hash size
 	for {
 		if n.h != nil {
@@ -67,7 +72,6 @@ func hashing(nd *Node, hash hash.Hash) ([]byte, error) {
 }
 
 type Tree struct {
-	hash   hash.Hash
 	levels []Level
 }
 
@@ -82,8 +86,8 @@ func (b Branch) String() string {
 	return buf.String()
 }
 
-func NewTree(hash hash.Hash) *Tree {
-	return &Tree{hash: hash}
+func NewTree() *Tree {
+	return &Tree{}
 }
 
 func (t *Tree) String() string {
@@ -127,15 +131,20 @@ func (p *Proof) String() string {
 	return fmt.Sprintf("---PROOF---\n[%x..]\n\n%v", p.h[:3], p.br)
 }
 
-func (t *Tree) ComputeProof(val []byte) (*Proof, error) {
-	t.hash.Reset()
-	t.hash.Write(val)
-	h := t.hash.Sum(nil)
-	height := t.Height()
-	leaves, err := t.level(height)
-	if err != nil {
-		return nil, err
+func (t *Tree) BfsTraverse(fn func(*Node)) {
+	for h := 1; h <= t.Height(); h++ {
+		level, _ := t.level(h)
+		for _, nd := range level {
+			fn(nd)
+		}
 	}
+}
+
+func (t *Tree) ComputeProofByValue(val []byte) (*Proof, error) {
+	leaves, _ := t.level(t.Height())
+	hash := NewHash()
+	hashWrite(val)
+	h := hash.Sum(nil)
 	var i int
 	for i, _ = range leaves {
 		if bytes.Equal(leaves[i].h, h) {
@@ -172,7 +181,44 @@ func (t *Tree) ComputeProof(val []byte) (*Proof, error) {
 	return proof, nil
 }
 
-func (t *Tree) VerifyProof(p *Proof) bool {
+func (t *Tree) ComputeProofByIndex(i int) (*Proof, error) {
+	if i < 0 {
+		return nil, errors.New("Index cannot be less than 0")
+	}
+	height := t.Height()
+	leaves, _ := t.level(height)
+	if i >= len(leaves) {
+		return nil, errors.New("Index cannot be greater than/equal to number of values")
+	}
+	h := leaves[i].h
+	var br Branch
+	if (i^1)&1 == 0 {
+		br = append(br, append([]byte{0}, leaves[i^1].h...))
+	} else {
+		br = append(br, append([]byte{1}, leaves[i^1].h...))
+	}
+	for {
+		i /= 2
+		height--
+		level, err := t.level(height)
+		if err != nil {
+			return nil, err
+		}
+		if len(level) == 1 {
+			// We hit root... break
+			break
+		}
+		if (i^1)&1 == 0 {
+			br = append(br, append([]byte{0}, level[i^1].h...))
+		} else {
+			br = append(br, append([]byte{1}, level[i^1].h...))
+		}
+	}
+	proof := NewProof(br, h)
+	return proof, nil
+}
+
+func VerifyProof(p *Proof) bool {
 	for _, h := range p.br {
 		if h != nil {
 			if h[0] == 0 {
@@ -267,6 +313,6 @@ func calcTreeHeight(count int) int {
 	case count == 1:
 		return 2
 	default:
-		return Log2(count) + 1
+		return Log2Ceil(count) + 1
 	}
 }
